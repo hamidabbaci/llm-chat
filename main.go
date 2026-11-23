@@ -26,19 +26,11 @@ type chatResponse struct {
 	Reply string `json:"reply"`
 }
 
-// ⚠️ فقط برای تست محلی — این فایل رو هیچ‌وقت روی GitHub آپلود نکن
-
-func askGemini(question string) (string, error) {
+func askGemini(fullHistory []map[string]interface{}) (string, error) {
 	url := "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash-lite:generateContent?key=" + apiKey
 
 	requestBody := map[string]interface{}{
-		"contents": []map[string]interface{}{
-			{
-				"parts": []map[string]string{
-					{"text": question},
-				},
-			},
-		},
+		"contents": fullHistory,
 	}
 
 	jsonData, err := json.Marshal(requestBody)
@@ -76,9 +68,28 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	answer, err := askGemini(req.Message)
+	// پیام کاربر رو ذخیره کن
+	if err := saveMessage("user", req.Message); err != nil {
+		http.Error(w, "خطا در ذخیره‌ی پیام: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// کل تاریخچه رو از دیتابیس بخون
+	history, err := loadHistory()
+	if err != nil {
+		http.Error(w, "خطا در خواندن تاریخچه: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	answer, err := askGemini(history)
 	if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// جواب مدل رو هم ذخیره کن
+	if err := saveMessage("model", answer); err != nil {
+		http.Error(w, "خطا در ذخیره‌ی جواب: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
@@ -87,6 +98,8 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func main() {
+	initDB()
+
 	http.HandleFunc("/chat", chatHandler)
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 
