@@ -97,10 +97,31 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(chatResponse{Reply: answer})
 }
 
+type classifyRequest struct {
+	Message string `json:"message"`
+}
+
+func classifyHandler(w http.ResponseWriter, r *http.Request) {
+	var req classifyRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "بدنه‌ی درخواست نامعتبر است", http.StatusBadRequest)
+		return
+	}
+
+	result, err := classifyMessage(req.Message)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(result)
+}
 func main() {
 	initDB()
 
 	http.HandleFunc("/chat", chatHandler)
+	http.HandleFunc("/classify", classifyHandler)
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 
 	fmt.Println("سرور روی http://localhost:8080 اجراست")
