@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 )
 
 type geminiResponse struct {
@@ -68,17 +69,45 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// پیام کاربر رو ذخیره کن
+	// پیام خام کاربر رو همونطور که هست ذخیره کن (بدون context اضافه)
 	if err := saveMessage("user", req.Message); err != nil {
 		http.Error(w, "خطا در ذخیره‌ی پیام: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// کل تاریخچه رو از دیتابیس بخون
+	// کل تاریخچه‌ی مکالمه رو از دیتابیس بخون
 	history, err := loadHistory()
 	if err != nil {
 		http.Error(w, "خطا در خواندن تاریخچه: "+err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// جست‌وجوی معنایی بر اساس همین پیام جدید کاربر
+	results, err := searchKnowledge(req.Message, 3)
+	if err != nil {
+		http.Error(w, "خطا در جست‌وجوی دانش: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var contextParts []string
+	for _, res := range results {
+		contextParts = append(contextParts, res.Content)
+	}
+	context := strings.Join(contextParts, "\n\n---\n\n")
+
+	// آخرین پیام (همون سوال فعلی) رو فقط برای همین درخواست با context ترکیب می‌کنیم
+	if len(history) > 0 {
+		augmentedText := fmt.Sprintf(`تو پشتیبان هوش مصنوعی صرافی Fund Wayne هستی. این اطلاعات رو در نظر بگیر و اگه به سوال مرتبط بود، جوابت رو دقیقاً بر همون اساس بده. اگه سوال خارج از این اطلاعات و خارج از حوزه‌ی Fund Wayne بود، به‌عنوان یک دستیار عمومی جواب بده:
+
+%s
+
+سوال کاربر: %s`, context, req.Message)
+
+		lastIndex := len(history) - 1
+		history[lastIndex] = map[string]interface{}{
+			"role":  "user",
+			"parts": []map[string]string{{"text": augmentedText}},
+		}
 	}
 
 	answer, err := askGemini(history)
@@ -87,7 +116,7 @@ func chatHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// جواب مدل رو هم ذخیره کن
+	// جواب مدل رو هم ذخیره کن (خام، بدون context)
 	if err := saveMessage("model", answer); err != nil {
 		http.Error(w, "خطا در ذخیره‌ی جواب: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -182,12 +211,38 @@ func searchHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(results)
 }
+
+type ragRequest struct {
+	Question string `json:"question"`
+}
+
+type ragResponse struct {
+	Answer string `json:"answer"`
+}
+
+func ragHandler(w http.ResponseWriter, r *http.Request) {
+	var req ragRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "بدنه‌ی درخواست نامعتبر است", http.StatusBadRequest)
+		return
+	}
+
+	answer, err := answerWithRAG(req.Question)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(ragResponse{Answer: answer})
+}
 func main() {
 	initDB()
 
 	http.HandleFunc("/chat", chatHandler)
 	http.HandleFunc("/classify", classifyHandler)
 	http.HandleFunc("/search", searchHandler)
+	http.HandleFunc("/ask", ragHandler)
 	http.Handle("/", http.FileServer(http.Dir("./static")))
 	http.HandleFunc("/similarity", similarityHandler)
 	http.HandleFunc("/ingest", ingestHandler)
