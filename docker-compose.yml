@@ -1,6 +1,6 @@
 services:
   db:
-    image: postgres
+    image: pgvector/pgvector:pg17
     container_name: llm-chat-db
     environment:
       POSTGRES_PASSWORD: ${DB_PASSWORD}
@@ -9,6 +9,14 @@ services:
       - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql
+
+  adminer:
+    image: adminer
+    container_name: llm-chat-adminer
+    ports:
+      - "8081:8080"
+    depends_on:
+      - db
 
 volumes:
   pgdata:

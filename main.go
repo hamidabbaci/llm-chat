@@ -117,13 +117,80 @@ func classifyHandler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(result)
 }
+
+type similarityRequest struct {
+	TextA string `json:"text_a"`
+	TextB string `json:"text_b"`
+}
+
+type similarityResponse struct {
+	Similarity float64 `json:"similarity"`
+}
+
+func similarityHandler(w http.ResponseWriter, r *http.Request) {
+	var req similarityRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "بدنه‌ی درخواست نامعتبر است", http.StatusBadRequest)
+		return
+	}
+
+	embA, err := getEmbedding(req.TextA)
+	if err != nil {
+		http.Error(w, "خطا در گرفتن embedding اول: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	embB, err := getEmbedding(req.TextB)
+	if err != nil {
+		http.Error(w, "خطا در گرفتن embedding دوم: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	sim := cosineSimilarity(embA, embB)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(similarityResponse{Similarity: sim})
+}
+func ingestHandler(w http.ResponseWriter, r *http.Request) {
+	count, err := ingestFile("./knowledge/fundwayne-support-guide.md")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]int{"chunks_saved": count})
+}
+
+type searchRequest struct {
+	Query string `json:"query"`
+}
+
+func searchHandler(w http.ResponseWriter, r *http.Request) {
+	var req searchRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "بدنه‌ی درخواست نامعتبر است", http.StatusBadRequest)
+		return
+	}
+
+	results, err := searchKnowledge(req.Query, 3)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(results)
+}
 func main() {
 	initDB()
 
 	http.HandleFunc("/chat", chatHandler)
 	http.HandleFunc("/classify", classifyHandler)
+	http.HandleFunc("/search", searchHandler)
 	http.Handle("/", http.FileServer(http.Dir("./static")))
-
+	http.HandleFunc("/similarity", similarityHandler)
+	http.HandleFunc("/ingest", ingestHandler)
 	fmt.Println("سرور روی http://localhost:8080 اجراست")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		fmt.Println("خطا در اجرای سرور:", err)
